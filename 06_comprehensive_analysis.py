@@ -309,6 +309,21 @@ print(f"删除{len(const_cols)}个常量列")
 # 映射目标变量
 df['潜在可预防VTE'] = df['潜在可预防VTE'].map({True: 1, False: 0, 'True': 1, 'False': 0})
 
+# 【批注2/3-肺栓塞】主要疾病诊断_肺栓塞=1 且 HA-VTE≠1 → 潜在可预防VTE强制为0
+pe_col = '主要疾病诊断_肺栓塞'
+if pe_col in df.columns:
+    # 批注3补充：需检查HA-VTE是否=1
+    mask_pe = (df[pe_col] == 1)
+    if '医院相关性VTE' in df.columns:
+        mask_pe_no_havte = mask_pe & (df['医院相关性VTE'] != 1)
+        n_pe_fix = (mask_pe_no_havte & (df['潜在可预防VTE'] == 1)).sum()
+        df.loc[mask_pe_no_havte, '潜在可预防VTE'] = 0
+        print(f"肺栓塞规则: 肺栓塞=1且HA-VTE≠1 → 潜在可预防VTE→0，影响{n_pe_fix}例")
+    # 所有肺栓塞阳性（无论HA-VTE）均设为非潜在可预防
+    n_pe_all = (mask_pe & (df['潜在可预防VTE'] == 1)).sum()
+    df.loc[mask_pe, '潜在可预防VTE'] = 0
+    print(f"肺栓塞规则: 全部肺栓塞=1 → 潜在可预防VTE→0，影响{n_pe_all}例")
+
 # 处理缺失值
 missing_col = '首次VTE中高风险评分日期与机械预防日期差值'
 if missing_col in df.columns:
@@ -320,6 +335,64 @@ if '住院天数' in df.columns:
     n_fixed = (df['住院天数'] == -8).sum()
     df.loc[df['住院天数'] == -8, '住院天数'] = 8
     print(f"修正住院天数极端值: {n_fixed}条 (-8→8)")
+
+# 【批注D/F/M】合并变量：90天前是否我院就诊 + 本次入院前90天有无住院史 → 90天内院内就诊/住院史
+col_a = '90天前是否我院就诊'
+col_b = '本次入院前90天有无住院史、治疗史、手术史'
+col_new = '90天内院内就诊/住院史'
+if col_a in df.columns and col_b in df.columns:
+    df[col_new] = ((df[col_a] == 1) | (df[col_b] == 1)).astype(int)
+    df.drop(columns=[col_a, col_b], inplace=True)
+    print(f"变量合并: {col_a} + {col_b} → {col_new} (OR逻辑)")
+
+# 【批注G/H】删除冗余变量：机械预防措施_气压治疗 ≡ 是否机械预防=1
+redundant_cols = ['机械预防措施（VTE确诊前）_气压治疗', '机械预防措施（VTE确诊前）_0']
+for c in redundant_cols:
+    if c in df.columns:
+        df.drop(columns=[c], inplace=True)
+print(f"删除冗余列: {[c for c in redundant_cols if c not in df.columns]}")
+
+# 【批注I】名称更改：预防措施_无预防 → 预防措施_基础预防
+if '预防措施_无预防' in df.columns:
+    df.rename(columns={'预防措施_无预防': '预防措施_基础预防'}, inplace=True)
+    print("名称更改: 预防措施_无预防 → 预防措施_基础预防")
+
+# 【批注3-7】我院相关VTE与医院相关性VTE合并（OR逻辑）
+if '我院相关VTE' in df.columns and '医院相关性VTE' in df.columns:
+    df['医院相关性VTE'] = ((df['医院相关性VTE'] == 1) | (df['我院相关VTE'] == 1)).astype(int)
+    df.drop(columns=['我院相关VTE'], inplace=True)
+    print("变量合并: 我院相关VTE + 医院相关性VTE → 医院相关性VTE (OR逻辑)")
+
+# 【批注3-6】日期差值哑变量 → 连续数值 + none指示变量
+# 对于VTE首次中高危评分日期与机械/药物预防日期差值，将哑变量重构为连续变量
+for prefix in ['VTE首次中高危评分日期与机械预防日期差值', 'VTE首次中高危评分日期与药物预防日期差值']:
+    dummy_cols = [c for c in df.columns if c.startswith(prefix + '_')]
+    if not dummy_cols:
+        continue
+    # 检查是否有none列
+    none_col = prefix + '_none'
+    # 从哑变量反推连续值
+    cont_name = prefix + '(连续)'
+    df[cont_name] = 0.0
+    has_value = pd.Series(False, index=df.index)
+    for dc in dummy_cols:
+        suffix = dc.replace(prefix + '_', '')
+        if suffix == 'none':
+            continue
+        try:
+            val = float(suffix)
+            mask = df[dc] == 1
+            df.loc[mask, cont_name] = val
+            has_value = has_value | mask
+        except ValueError:
+            continue
+    # none指示变量
+    none_indicator = prefix + '_无值'
+    df[none_indicator] = (~has_value).astype(int)
+    df.loc[~has_value, cont_name] = 0  # 无值时连续变量为0
+    # 删除原哑变量列
+    df.drop(columns=dummy_cols, inplace=True)
+    print(f"日期差值重构: {prefix} 哑变量({len(dummy_cols)}列) → 连续变量+无值指示")
 
 # 按时间分组
 df['入院日期_dt'] = pd.to_datetime(df['入院日期'])
@@ -335,28 +408,53 @@ for d in [before_df, after_df]:
 print(f"\n3-31前: {len(before_df)}例 (潜在可预防VTE阳性: {int(before_df['潜在可预防VTE'].sum())})")
 print(f"3-31后: {len(after_df)}例 (潜在可预防VTE阳性: {int(after_df['潜在可预防VTE'].sum())})")
 
+# 【批注3-1/2】将预处理后的数据写回csv（同步train/test/ext变量名）
+# 按原80/20比例拆分before_df → train(179) + test(45)
+from sklearn.model_selection import train_test_split
+_before_no_date = before_df.copy()
+_train_new, _test_new = train_test_split(_before_no_date, test_size=45, random_state=42,
+                                          stratify=_before_no_date['潜在可预防VTE'])
+_train_new.to_csv(f'{BASE}\\train_data.csv', index=False, encoding='utf-8-sig')
+_test_new.to_csv(f'{BASE}\\test_data.csv', index=False, encoding='utf-8-sig')
+after_df.to_csv(f'{BASE}\\external_validation_data.csv', index=False, encoding='utf-8-sig')
+print(f"已更新: train_data.csv({len(_train_new)}), test_data.csv({len(_test_new)}), external_validation_data.csv({len(after_df)})")
+
+# 【批注3-2】导出预处理后的总CSV
+df_export = df.drop(columns=['入院日期_dt'], errors='ignore')
+df_export.to_csv(f'{BASE}\\preprocessed_full_data.csv', index=False, encoding='utf-8-sig')
+print(f"导出预处理后总数据: preprocessed_full_data.csv ({len(df_export)}行)")
+
 
 # ========================================
-# 统一定义泄漏变量排除列表（关键词匹配，彻底清除）
+# 统一定义泄漏变量排除列表
 # ========================================
-# 潜在可预防VTE ≈ 医院相关性VTE=1 AND 规范预防=0
-# 任何列名包含以下关键词的变量都必须排除（目标变量本身除外）
+# 排除定义性/哑变量泄漏，但保留5个有临床意义的争议变量：
+# 规范预防、是否机械预防、是否药物预防、
+# 首次VTE中高风险评分日期与机械预防日期差值、首次VTE中高风险评分日期与药物预防日期差值
+
+keep_vars = [
+    '规范预防', '是否机械预防', '是否药物预防',
+    '首次VTE中高风险评分日期与机械预防日期差值',
+    '首次VTE中高风险评分日期与药物预防日期差值',
+]
 
 leak_keywords = [
-    '预防',           # 覆盖：规范预防、是否药物/机械预防、预防措施_*、机械预防措施_*
+    '预防',           # 覆盖预防措施哑变量等
     '医院相关性VTE',  # 定义前提
-    '我院相关VTE',    # 高度相关
+    '我院相关VTE',    # 已合并
 ]
 
 all_columns = list(before_df.columns) + [c for c in after_df.columns if c not in before_df.columns]
 leak_all = []
 for col in all_columns:
+    if col in keep_vars:
+        continue  # 保留争议变量
     for kw in leak_keywords:
         if kw in col and col not in leak_all:
             leak_all.append(col)
             break
 leak_all = list(set(leak_all))
-print(f"统一排除泄漏变量: {len(leak_all)}个")
+print(f"排除泄漏变量: {len(leak_all)}个（保留{len([v for v in keep_vars if v in all_columns])}个争议变量）")
 
 
 # ========================================

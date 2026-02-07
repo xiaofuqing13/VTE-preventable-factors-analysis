@@ -45,39 +45,66 @@ ext_raw = pd.read_csv(os.path.join(BASE, 'external_validation_data.csv'))
 for d in [train_raw, test_raw, ext_raw]:
     d[OUTCOME] = d[OUTCOME].map({True: 1, False: 0, 'True': 1, 'False': 0, 1: 1, 0: 0})
 
+# 【批注2-肺栓塞】主要疾病诊断_肺栓塞=1 → 潜在可预防VTE强制为0
+for d in [train_raw, test_raw, ext_raw]:
+    pe_col = '主要疾病诊断_肺栓塞'
+    if pe_col in d.columns:
+        d.loc[d[pe_col] == 1, OUTCOME] = 0
+
 # 修正住院天数
 for d in [train_raw, test_raw, ext_raw]:
     if '住院天数' in d.columns:
         d.loc[d['住院天数'] == -8, '住院天数'] = 8
+
+# 【批注D/F/M】合并变量
+for d in [train_raw, test_raw, ext_raw]:
+    col_a = '90天前是否我院就诊'
+    col_b = '本次入院前90天有无住院史、治疗史、手术史'
+    if col_a in d.columns and col_b in d.columns:
+        d['90天内院内就诊/住院史'] = ((d[col_a] == 1) | (d[col_b] == 1)).astype(int)
+        d.drop(columns=[col_a, col_b], inplace=True)
+
+# 【批注G/H】删除冗余列
+for d in [train_raw, test_raw, ext_raw]:
+    for c in ['机械预防措施（VTE确诊前）_气压治疗', '机械预防措施（VTE确诊前）_0']:
+        if c in d.columns:
+            d.drop(columns=[c], inplace=True)
+
+# 【批注I】名称更改
+for d in [train_raw, test_raw, ext_raw]:
+    if '预防措施_无预防' in d.columns:
+        d.rename(columns={'预防措施_无预防': '预防措施_基础预防'}, inplace=True)
 
 # 删除非数值列
 drop_cols = ['入院日期', 'dataset']
 for d in [train_raw, test_raw, ext_raw]:
     d.drop(columns=[c for c in drop_cols if c in d.columns], inplace=True)
 
-# ★★★ 排除数据泄漏变量（关键词匹配，彻底清除） ★★★
-# 潜在可预防VTE ≈ 医院相关性VTE=1 AND 规范预防=0
-# 任何包含以下关键词的列名都必须排除
+# ★★★ 排除泄漏变量（保留5个争议变量） ★★★
+keep_vars = [
+    '规范预防', '是否机械预防', '是否药物预防',
+    '首次VTE中高风险评分日期与机械预防日期差值',
+    '首次VTE中高风险评分日期与药物预防日期差值',
+]
 
 leak_keywords = [
-    '预防',           # 覆盖：规范预防、是否药物预防、是否机械预防、预防措施_*、预防措施_新_*、机械预防措施_*
+    '预防',           # 覆盖预防措施哑变量等
     '医院相关性VTE',  # 定义前提
-    '我院相关VTE',    # 高度相关
+    '我院相关VTE',    # 已合并
 ]
 
 for d in [train_raw, test_raw, ext_raw]:
     cols_to_drop = []
     for col in d.columns:
-        if col == OUTCOME:
-            continue  # 目标变量本身不排除
+        if col == OUTCOME or col in keep_vars:
+            continue
         for kw in leak_keywords:
             if kw in col:
                 cols_to_drop.append(col)
                 break
     d.drop(columns=cols_to_drop, inplace=True, errors='ignore')
 
-print(f'已排除 {len(cols_to_drop)} 个数据泄漏变量（关键词匹配）')
-print(f'排除示例: {cols_to_drop[:8]}...')
+print(f'已排除 {len(cols_to_drop)} 个泄漏变量（保留{len([v for v in keep_vars if v in d.columns])}个争议变量）')
 
 # 缺失值处理（仅对非泄漏列执行）
 missing_col = '首次VTE中高风险评分日期与机械预防日期差值'
@@ -139,6 +166,33 @@ print('=' * 60)
 n_pos = int(y_train.sum())
 n_neg = int(len(y_train) - n_pos)
 
+# 【批注2d】XGBoost调参优化（RandomizedSearchCV）
+from sklearn.model_selection import RandomizedSearchCV, StratifiedKFold
+print('XGBoost调参优化中...')
+_xgb_param_dist = {
+    'n_estimators': [100, 200, 300, 500],
+    'max_depth': [3, 4, 5, 6, 7],
+    'learning_rate': [0.01, 0.05, 0.1, 0.15],
+    'subsample': [0.7, 0.8, 0.9, 1.0],
+    'colsample_bytree': [0.6, 0.7, 0.8, 0.9, 1.0],
+    'min_child_weight': [1, 3, 5, 7],
+    'reg_alpha': [0, 0.01, 0.1, 1],
+    'reg_lambda': [0.5, 1, 2, 5],
+}
+_xgb_base = XGBClassifier(
+    scale_pos_weight=n_neg/n_pos, eval_metric='logloss',
+    random_state=42, use_label_encoder=False, n_jobs=-1)
+_xgb_cv = StratifiedKFold(n_splits=10, shuffle=True, random_state=42)
+_xgb_search = RandomizedSearchCV(
+    _xgb_base, _xgb_param_dist, n_iter=60, scoring='roc_auc',
+    cv=_xgb_cv, random_state=42, n_jobs=-1, verbose=0)
+_xgb_search.fit(X_train, y_train)
+_best_xgb = _xgb_search.best_estimator_
+_best_xgb_params = _xgb_search.best_params_
+print(f'XGBoost最佳参数: {_best_xgb_params}')
+print(f'XGBoost最佳CV AUC: {_xgb_search.best_score_:.4f}')
+_xgb_params_str = ', '.join([f'{k}={v}' for k, v in _best_xgb_params.items()])
+
 models = {
     'Random Forest': {
         'model': RandomForestClassifier(
@@ -155,11 +209,8 @@ models = {
         'use_scaled': True
     },
     'XGBoost': {
-        'model': XGBClassifier(
-            n_estimators=200, max_depth=5, learning_rate=0.1,
-            scale_pos_weight=n_neg/n_pos, eval_metric='logloss',
-            random_state=42, use_label_encoder=False),
-        'params': f'n_estimators=200, max_depth=5, learning_rate=0.1, scale_pos_weight={n_neg/n_pos:.2f}',
+        'model': _best_xgb,
+        'params': f'调参优化: {_xgb_params_str}',
         'use_scaled': False
     },
     'Naive Bayes': {
@@ -304,20 +355,21 @@ import shap
 
 Xtr_shap = X_train_scaled if best_scaled else X_train
 
-if best_name in ['Random Forest', 'XGBoost', 'Decision Tree']:
-    explainer = shap.TreeExplainer(best_model)
-    shap_values = explainer.shap_values(Xtr_shap)
-    if isinstance(shap_values, list):
-        shap_vals = shap_values[1]  # 正类
-    else:
-        shap_vals = shap_values
+# 强制使用XGBoost做SHAP（最稳定），即使它不是测试集最佳
+_xgb_model_for_shap = fitted_models['XGBoost'][0]
+explainer = shap.TreeExplainer(_xgb_model_for_shap)
+shap_values = explainer.shap_values(X_train)  # XGBoost不需要scaled
+if isinstance(shap_values, list):
+    shap_vals = shap_values[1]
 else:
-    explainer = shap.KernelExplainer(best_model.predict_proba, shap.sample(Xtr_shap, 50))
-    shap_vals = explainer.shap_values(Xtr_shap)
-    if isinstance(shap_vals, list):
-        shap_vals = shap_vals[1]
+    shap_vals = shap_values
+
+# 确保shap_vals是2D
+if shap_vals.ndim != 2:
+    shap_vals = shap_vals.reshape(len(X_train), -1)
 
 # SHAP特征重要性
+Xtr_shap = X_train  # XGBoost用原始数据
 mean_abs_shap = np.abs(shap_vals).mean(axis=0)
 shap_df = pd.DataFrame({
     '变量': Xtr_shap.columns,
