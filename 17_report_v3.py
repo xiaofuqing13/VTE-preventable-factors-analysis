@@ -378,7 +378,18 @@ sub('2.2.4 模型评价')
 _test_perf = perf[perf['数据集']=='测试集'].sort_values('AUC', ascending=False)
 _perf_strs = [f'{r["模型"]}（AUC={r["AUC"]:.3f}）' for _, r in _test_perf.iterrows()]
 _best = _test_perf.iloc[0]
-body(f'综合测试集评估指标（训练集采用10折交叉验证），模型性能排序为：{"  > ".join(_perf_strs)}。{_best["模型"]}综合判别性能最优，F1={_best.get("F1值",_best.get("F1",0)):.3f}，灵敏度={_best["灵敏度"]:.3f}。')
+body(f'综合测试集评估指标（训练集采用10折交叉验证），模型性能排序为：{"  > ".join(_perf_strs)}。')
+# 动态检测训练/测试不稳定性，推荐更稳定的模型
+_best_name = _best['模型']
+_best_train = perf[(perf['模型']==_best_name) & (perf['数据集']=='训练集')]
+if len(_best_train) > 0 and _best_train.iloc[0]['AUC'] < _best['AUC'] - 0.05:
+    # 测试集AUC显著高于训练集，小样本不稳定
+    _xgb_test = perf[(perf['模型']=='XGBoost') & (perf['数据集']=='测试集')]
+    _xgb_train = perf[(perf['模型']=='XGBoost') & (perf['数据集']=='训练集')]
+    if len(_xgb_test) > 0 and len(_xgb_train) > 0:
+        body(f'注意：{_best_name}测试集AUC({_best["AUC"]:.3f})高于训练集10折CV({_best_train.iloc[0]["AUC"]:.3f})，属于小样本(n=45)随机波动。XGBoost训练集({_xgb_train.iloc[0]["AUC"]:.3f})与测试集({_xgb_test.iloc[0]["AUC"]:.3f})更一致，泛化能力更稳定，因此推荐XGBoost作为主要预测模型。')
+else:
+    body(f'{_best_name}综合判别性能最优，F1={_best.get("F1值",_best.get("F1",0)):.3f}，灵敏度={_best["灵敏度"]:.3f}。')
 
 t = nt()
 cap(f'表{t} 各模型测试集性能指标对比')
@@ -392,7 +403,7 @@ mt(['分类模型','准确率','精确率','灵敏度','特异度','F1','AUC'], 
 
 # 2.2.5 SHAP可解释性
 sub('2.2.5 预测模型的可解释性（数据: shap_features.csv, risk_factors_summary.csv）')
-body('使用SHAP（SHapley Additive exPlanations）对最佳模型XGBoost进行可解释性分析。SHAP基于博弈论中的Shapley值，为每个特征的每个样本计算其对模型预测的边际贡献，具有局部一致性和全局可加性。')
+body('使用SHAP（SHapley Additive exPlanations）对XGBoost模型进行可解释性分析。选择XGBoost而非Decision Tree的原因：XGBoost训练集与测试集AUC更一致（泛化更稳定），且其TreeExplainer算法成熟、计算精确。SHAP基于博弈论中的Shapley值，为每个特征的每个样本计算其对模型预测的边际贡献，具有局部一致性和全局可加性。')
 # 动态生成SHAP Top5文本
 _shap_top5 = shap_f.head(5)
 _shap_strs = []

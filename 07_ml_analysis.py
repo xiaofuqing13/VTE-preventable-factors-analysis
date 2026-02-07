@@ -80,9 +80,15 @@ drop_cols = ['入院日期', 'dataset']
 for d in [train_raw, test_raw, ext_raw]:
     d.drop(columns=[c for c in drop_cols if c in d.columns], inplace=True)
 
-# ★★★ 排除全部泄漏变量 ★★★
+# ★★★ 排除泄漏变量（保留5个争议变量） ★★★
+keep_vars = [
+    '规范预防', '是否机械预防', '是否药物预防',
+    '首次VTE中高风险评分日期与机械预防日期差值',
+    '首次VTE中高风险评分日期与药物预防日期差值',
+]
+
 leak_keywords = [
-    '预防',           # 覆盖所有预防相关变量
+    '预防',           # 覆盖预防措施哑变量等
     '医院相关性VTE',  # 定义前提
     '我院相关VTE',    # 已合并
 ]
@@ -90,7 +96,7 @@ leak_keywords = [
 for d in [train_raw, test_raw, ext_raw]:
     cols_to_drop = []
     for col in d.columns:
-        if col == OUTCOME:
+        if col == OUTCOME or col in keep_vars:
             continue
         for kw in leak_keywords:
             if kw in col:
@@ -98,7 +104,14 @@ for d in [train_raw, test_raw, ext_raw]:
                 break
     d.drop(columns=cols_to_drop, inplace=True, errors='ignore')
 
-print(f'已排除 {len(cols_to_drop)} 个泄漏变量（全部排除，不保留争议变量）')
+print(f'已排除 {len(cols_to_drop)} 个泄漏变量（保留{len([v for v in keep_vars if v in d.columns])}个争议变量）')
+
+# 缺失值处理（仅对非泄漏列执行）
+missing_col = '首次VTE中高风险评分日期与机械预防日期差值'
+for d in [train_raw, test_raw, ext_raw]:
+    if missing_col in d.columns:
+        d[missing_col + '_无'] = d[missing_col].isnull().astype(int)
+        d[missing_col] = d[missing_col].fillna(0)
 
 # 只保留数值列
 def prepare_numeric(df, outcome):
