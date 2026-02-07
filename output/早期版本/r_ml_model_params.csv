@@ -1,0 +1,7 @@
+"模型","参数设置"
+"Random Forest","ntree=200, mtry=sqrt(p), nodesize=2, classwt=balanced"
+"SVM","kernel=radial, cost=1.0, gamma=1/p, class.weights=balanced"
+"XGBoost","max_depth=5, eta=0.1, scale_pos_weight=1.18, nrounds=200"
+"Naive Bayes","GaussianNB (e1071::naiveBayes, 默认参数)"
+"Decision Tree","maxdepth=8, minsplit=5, minbucket=2, prior=balanced (rpart)"
+"KNN","k=7, prob=TRUE (class::knn)"

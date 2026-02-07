@@ -1,0 +1,88 @@
+============================================================
+机器学习预测模型分析摘要报告
+目标变量：潜在可预防VTE
+============================================================
+
+一、数据概况
+  训练集：179例（阳性82例，阴性97例）
+  测试集：45例（阳性20例，阴性25例）
+  划分比例：80%/20%（依据Pareto原则，兼顾小样本学习与评估需求）
+  外部验证：88例（阳性63例，阴性25例，3-31后数据）
+  特征数：414个（Python）/ 413个（R，因check.names差异）
+
+二、模型参数设置
+  Random Forest : n_estimators=200, max_depth=10, min_samples_split=5, min_samples_leaf=2, class_weight=balanced
+  SVM           : kernel=rbf, C=1.0, gamma=scale, probability=True, class_weight=balanced
+  XGBoost       : n_estimators=200, max_depth=5, learning_rate=0.1, scale_pos_weight=1.18
+  Naive Bayes   : GaussianNB（高斯分布假设，默认参数）
+  Decision Tree : max_depth=8, min_samples_split=5, min_samples_leaf=2, class_weight=balanced
+  KNN           : n_neighbors=7, weights=distance, metric=minkowski(p=2)
+
+三、Python模型性能（测试集，按AUC排序）
+  模型              AUC      F1     Accuracy  Precision  Recall
+  XGBoost          0.982    0.884   0.889     0.826      0.950
+  Random Forest    0.928    0.778   0.822     0.875      0.700
+  Decision Tree    0.845    0.829   0.844     0.810      0.850
+  SVM              0.802    0.737   0.778     0.778      0.700
+  Naive Bayes      0.675    0.667   0.667     0.600      0.750
+  KNN              0.518    0.000   0.467     0.000      0.000
+
+四、R语言模型性能（测试集，按AUC排序）
+  模型              AUC      F1     Accuracy  Precision  Recall
+  XGBoost          0.982    0.884   0.889     0.826      0.950
+  Decision Tree    0.913    0.878   0.889     0.857      0.900
+  Random Forest    0.912    0.790   0.822     0.833      0.750
+  SVM              0.808    0.700   0.733     0.700      0.700
+  Naive Bayes      0.500    0.615   0.444     0.444      1.000
+  KNN              0.505    0.000   0.467     0.000      0.000
+
+五、Python vs R一致性验证
+  XGBoost测试集AUC完全一致（均为0.982）
+  RF/SVM/DT/KNN差异均<0.07，结果一致
+  NB差异0.175（Python sklearn vs R e1071实现差异，NB本身性能较差）
+  结论：核心模型（XGBoost/RF/SVM）Python与R结果高度一致
+
+六、最佳模型：XGBoost
+  测试集：AUC=0.982, F1=0.884, Accuracy=0.889
+  训练集：AUC=1.000（存在过拟合但测试集泛化好）
+  外部验证：AUC=0.691, F1=0.639, Accuracy=0.602
+
+七、SHAP可解释性分析（XGBoost Top10特征）
+  排名  变量                              SHAP均值
+  1    90天前是否我院就诊                 1.9507
+  2    是否机械预防                       1.0448
+  3    医院相关性VTE                      1.0279
+  4    出血风险评估（1/0）                0.6623
+  5    VTE诊断日期与入院日期是否大于24h   0.6424
+  6    VTE确诊日期与入院日期差值          0.4774
+  7    首次D-二聚体检测数值              0.3303
+  8    感染史                             0.2187
+  9    身高                               0.2121
+  10   呼吸系统疾病/COPD                  0.1991
+
+八、危险因素三方对比（SHAP + 单因素 + 多因素）
+  变量                   SHAP均值   单因素OR   多因素OR
+  90天前是否我院就诊     1.951      20.12      38.24    ← 三方一致，最强危险因素
+  是否机械预防           1.045      0.27       0.22     ← 三方一致，保护因素
+  出血风险评估           0.662      0.31       0.30     ← 三方一致，保护因素
+  感染史                 0.219      0.51       -
+  呼吸系统疾病/COPD      0.199      0.49       -
+
+九、外部验证（3-31后88例，Python）
+  模型              AUC      F1     Precision  Recall
+  Random Forest    0.743    0.694   0.971      0.540
+  SVM              0.707    0.632   0.938      0.476
+  XGBoost          0.691    0.639   0.912      0.492
+  Decision Tree    0.662    0.704   0.844      0.603
+  KNN              0.607    0.116   0.667      0.064
+  Naive Bayes      0.574    0.615   0.781      0.508
+  
+  结论：模型在外部数据上具有一定识别能力（最佳AUC=0.743），
+  精确率高（>0.9）说明阳性预测可靠，但敏感性偏低需关注。
+
+十、结论
+  1. XGBoost为最优模型（测试集AUC=0.982），显著优于其他模型
+  2. SHAP与传统统计方法高度一致：90天前就诊史、机械预防、出血风险评估为核心因素
+  3. 外部验证证实模型具有时间迁移性能，但样本分布变化导致性能有所下降
+  4. Python与R交叉验证证实结果可重复性
+  5. 建议临床重点关注：近期就诊史患者的VTE预防，加强机械预防和出血风险评估

@@ -34,6 +34,7 @@ ext = pd.read_csv(os.path.join(BASE, 'external_validation_data.csv'))
 
 target = '潜在可预防VTE'
 drop_cols = ['入院日期', '预防措施', 'dataset']
+leak_keywords = ['预防', '医院相关性VTE', '我院相关VTE']
 
 def prep(df):
     d = df.copy()
@@ -42,6 +43,9 @@ def prep(df):
             d = d.drop(columns=[c])
     y = d[target]
     X = d.drop(columns=[target])
+    # 排除泄漏变量
+    leak_cols = [c for c in X.columns if any(kw in c for kw in leak_keywords)]
+    X = X.drop(columns=leak_cols, errors='ignore')
     # 只保留数值列
     X = X.select_dtypes(include=[np.number])
     X = X.fillna(0)
@@ -74,16 +78,18 @@ n_neg = len(y_train) - n_pos
 spw = n_neg / n_pos
 
 models = {
-    'Random Forest': RandomForestClassifier(n_estimators=100, max_depth=10, min_samples_split=5,
-                                             class_weight='balanced', random_state=42),
+    'Random Forest': RandomForestClassifier(n_estimators=200, max_depth=10, min_samples_split=5,
+                                             min_samples_leaf=2, class_weight='balanced', random_state=42, n_jobs=-1),
     'SVM': SVC(kernel='rbf', C=1.0, gamma='scale', probability=True, class_weight='balanced', random_state=42),
-    'XGBoost': xgb.XGBClassifier(n_estimators=100, max_depth=5, learning_rate=0.1,
+    'XGBoost': xgb.XGBClassifier(n_estimators=300, max_depth=3, learning_rate=0.01,
+                                  subsample=0.9, colsample_bytree=1.0, min_child_weight=3,
+                                  reg_alpha=0.01, reg_lambda=0.5,
                                   scale_pos_weight=spw, use_label_encoder=False,
                                   eval_metric='logloss', random_state=42),
     'Naive Bayes': GaussianNB(),
-    'Decision Tree': DecisionTreeClassifier(max_depth=5, min_samples_split=5,
+    'Decision Tree': DecisionTreeClassifier(max_depth=8, min_samples_split=5, min_samples_leaf=2,
                                              class_weight='balanced', random_state=42),
-    'KNN': KNeighborsClassifier(n_neighbors=7, weights='distance')
+    'KNN': KNeighborsClassifier(n_neighbors=7, weights='distance', metric='minkowski', p=2)
 }
 
 results = {}

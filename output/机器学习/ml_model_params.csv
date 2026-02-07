@@ -1,0 +1,7 @@
+﻿模型,参数设置
+Random Forest,"n_estimators=200, max_depth=10, min_samples_split=5, min_samples_leaf=2, class_weight=balanced"
+SVM,"kernel=rbf, C=1.0, gamma=scale, probability=True, class_weight=balanced"
+XGBoost,"调参优化: subsample=0.9, reg_lambda=0.5, reg_alpha=0.01, n_estimators=500, min_child_weight=3, max_depth=3, learning_rate=0.01, colsample_bytree=1.0"
+Naive Bayes,GaussianNB (默认参数，高斯分布假设)
+Decision Tree,"max_depth=8, min_samples_split=5, min_samples_leaf=2, class_weight=balanced"
+KNN,"n_neighbors=7, weights=distance, metric=minkowski(p=2)"
