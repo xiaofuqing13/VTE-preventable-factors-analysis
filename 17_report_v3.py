@@ -310,7 +310,7 @@ body('')
 # ====================
 ch('一、研究概述')
 body(f'本研究纳入{N_TOT_B + N_TOT_A}例VTE患者，以2025年3月31日为界划分为两个时期。3-31及之前{N_TOT_B}例（潜在可预防VTE阳性{N_POS_B}例，{N_POS_B/N_TOT_B*100:.1f}%），3-31之后{N_TOT_A}例（阳性{N_POS_A}例，{N_POS_A/N_TOT_A*100:.1f}%）。训练集与测试集均取自3-31之前数据，按80/20比例划分：训练集{N_TRAIN}例（阳性{N_TRAIN_POS}例），测试集{N_TEST}例（阳性{N_TEST_POS}例）。3-31之后{N_TOT_A}例用作外部验证集。')
-body('数据预处理：（1）极端值住院天数（-8天）修正为8天，其余保留；（2）缺失的机械预防日期差值创建"_无"指示变量并填充0值；（3）删除常量列；（4）排除预防相关泄漏变量（医院相关性VTE、规范预防、是否药物/机械预防、预防措施哑变量、VTE评分与预防日期差值等71个变量），保留5个有临床意义的预防变量（规范预防、是否机械预防、是否药物预防、首次VTE中高风险评分日期与机械/药物预防日期差值）；（5）对SVM和KNN模型使用StandardScaler进行特征标准化。')
+body('数据预处理：（1）极端值住院天数（-8天）修正为8天，其余保留；（2）删除常量列；（3）排除全部预防相关泄漏变量（医院相关性VTE、我院相关VTE、规范预防、是否药物/机械预防、预防措施哑变量、VTE评分与预防日期差值等），确保回归和机器学习分析不受定义性变量污染；（4）对SVM和KNN模型使用StandardScaler进行特征标准化。')
 
 # ====================
 # 二、变量筛选
@@ -729,14 +729,9 @@ _hau_sig = len(_hau[_hau['P值'] < 0.05]) if not _hau.empty else 0
 
 # 【批注6】泄漏变量列表CSV+报告表格
 _leak_kw = ['预防', '医院相关性VTE', '我院相关VTE']
-_keep_vars = ['规范预防', '是否机械预防', '是否药物预防',
-    '首次VTE中高风险评分日期与机械预防日期差值',
-    '首次VTE中高风险评分日期与药物预防日期差值']
 _all_cols_orig = pd.read_csv(os.path.join(BASE, 'final_processed_data_full_pipeline.csv'), nrows=0).columns.tolist()
 _leaked = []
 for c in _all_cols_orig:
-    if c in _keep_vars:
-        continue
     for kw in _leak_kw:
         if kw in c:
             _reason = '定义前提（阳性组100%=1）' if '医院相关性' in c or '我院相关' in c else '预防相关变量（直接/间接参与目标定义）'
@@ -745,7 +740,7 @@ for c in _all_cols_orig:
 _leak_df = pd.DataFrame(_leaked)
 _leak_df.to_csv(os.path.join(BASE, 'excluded_leak_variables.csv'), index=False, encoding='utf-8-sig')
 
-body(f'本分析已排除{len(_leak_df)}个预防相关泄漏变量，保留5个有临床意义的预防变量（规范预防、是否机械预防、是否药物预防、评分与预防日期差值）。')
+body(f'本分析已排除全部{len(_leak_df)}个预防相关泄漏变量（包括规范预防、是否机械/药物预防、预防日期差值等），确保模型不受定义性变量污染。')
 body(f'（详见 excluded_leak_variables.csv）')
 
 # 在报告中列出关键泄漏变量
@@ -760,7 +755,7 @@ body(f'（3）HA-VTE规范预防（3-31前{HA_B_TOT}例）：单因素{_hbu_sig}
 body(f'（4）HA-VTE规范预防（3-31后{HA_A_TOT}例）：单因素{_hau_sig}个变量P<0.05。')
 body('单因素分析：分类变量采用χ²检验（期望频数<5时改用Fisher精确检验），连续变量采用独立样本t检验（正态分布）或Mann-Whitney U检验（非正态分布）。')
 body('多因素分析：采用二元Logistic回归，共线性检查（r>0.8剔除），EPV原则约束入模变量数。')
-body(f'数据预处理：（1）极端值住院天数（-8天）修正为8天；（2）二分类变量0/1编码；（3）多分类变量One-Hot编码；（4）缺失的机械预防日期差值创建\"_无\"指示变量；（5）删除常量列；（6）排除{len(_leak_df)}个预防相关泄漏变量，保留5个有临床意义的预防变量。')
+body(f'数据预处理：（1）极端值住院天数（-8天）修正为8天；（2）二分类变量0/1编码；（3）多分类变量One-Hot编码；（4）删除常量列；（5）排除全部{len(_leak_df)}个预防相关泄漏变量，确保模型不受定义性变量污染。')
 
 if not rvp.empty:
     body('Python与R机器学习交叉验证结果：')
