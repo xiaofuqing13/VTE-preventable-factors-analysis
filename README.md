@@ -1,5 +1,8 @@
 # VTE（静脉血栓栓塞）潜在可预防因素分析
 
+![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white) ![scikit--learn](https://img.shields.io/badge/scikit--learn-F7931E?logo=scikitlearn&logoColor=white) ![License](https://img.shields.io/badge/License-MIT-green)
+
+
 ## 研究概述
 
 本项目对 **312例VTE患者** 进行回顾性分析，探索潜在可预防VTE的独立影响因素，并构建机器学习预测模型。以2025年3月31日为界，将数据分为两个时期进行对比分析。
